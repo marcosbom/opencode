@@ -72,14 +72,12 @@ describe("ConfigCompactionPlugin.Plugin", () => {
       yield* ConfigCompactionPlugin.Plugin.effect(
         host({
           event: { subscribe: () => bus.subscribe(Event.Updated) },
-          session: { hook: () => Effect.void },
+          session: { hook: () => Effect.succeed({ dispose: Effect.void }) },
         }),
       )
 
       // The fork's sliding window owns automatic context bounding, so config cannot re-enable auto compaction.
-      expect(
-        (yield* compaction.compact({ reason: "auto", context: nearInput.context })).status,
-      ).toBe("skipped")
+      expect((yield* compaction.compact({ reason: "auto", context: nearInput.context })).status).toBe("skipped")
 
       const ended = yield* bus
         .subscribe(SessionEvent.Compaction.Ended)
