@@ -30,11 +30,11 @@ application's resources directory, and packaging fails if it is missing.
 
 CLI preparation uses these channel rules:
 
-| Channel                                | Without `OPENCODE_CLI_DIST`    | With `OPENCODE_CLI_DIST`                      |
-| -------------------------------------- | ------------------------------ | --------------------------------------------- |
-| `dev`, `local`, unset, or unrecognized | Download the dev CLI           | Download the dev CLI; ignore the distribution |
-| `beta`                                 | Download the beta CLI          | Copy the supplied CLI; fail if it is missing  |
-| `prod`, `latest`                       | Fail before changing resources | Copy the supplied CLI; fail if it is missing  |
+| Channel                                | Without `OPENCODE_CLI_DIST` | With `OPENCODE_CLI_DIST`                     |
+| -------------------------------------- | --------------------------- | -------------------------------------------- |
+| `dev`, `local`, unset, or unrecognized | Download the dev CLI        | Copy the supplied CLI                        |
+| `beta`                                 | Download the beta CLI       | Copy the supplied CLI; fail if it is missing |
+| `prod`, `latest`                       | Fail before changing resources | Copy the supplied CLI; fail if it is missing |
 
 `bun dev` is separate from packaging: it uses local renderer/server mode, the dev app identity, and the CLI source by
 default. `bun dev --download-server <version>` instead downloads that CLI version for local development. Neither path
