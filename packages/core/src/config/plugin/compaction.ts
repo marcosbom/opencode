@@ -3,7 +3,6 @@ export * as ConfigCompactionPlugin from "./compaction.js"
 import { define } from "@opencode/plugin/effect/plugin"
 import { Effect } from "effect"
 import { Config } from "../../config.js"
-import { Model } from "../../model.js"
 import { SessionCompaction } from "../../session/compaction.js"
 import { SessionModelRequest } from "../../session/model-request.js"
 import { SessionWindow } from "../../session/window.js"
@@ -13,7 +12,6 @@ export const Plugin = define({
   id: "opencode.config.compaction",
   effect: Effect.fn(function* (ctx) {
     const config = yield* Config.Service
-    const models = yield* Model.Service
     const compaction = yield* SessionCompaction.Service
     const loaded = yield* ConfigEntryObserver.observe(config, ctx.event, compaction.reload())
     yield* compaction.transform((editor) => {
@@ -29,7 +27,10 @@ export const Plugin = define({
     })
     yield* ctx.session.hook("context", (event) =>
       Effect.gen(function* () {
-        const model = yield* models.get(event.model.providerID, event.model.id)
+        const available = yield* ctx.model.list()
+        const model = available.data.find(
+          (candidate) => candidate.providerID === event.model.providerID && candidate.id === event.model.id,
+        )
         if (!model) return
         const projected = SessionWindow.project(event, model.limit)
         event.messages = projected.messages
