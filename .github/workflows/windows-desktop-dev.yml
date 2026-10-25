@@ -1,6 +1,9 @@
 name: Windows desktop dev
 
 on:
+  push:
+    branches:
+      - sliding-window
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
