@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-desktop-dev-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-x64:
     name: windows x64 sliding context
