@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-desktop-dev-${{ github.ref }}
@@ -79,9 +79,45 @@ jobs:
           }
           Write-Host "Verified fork CLI SHA256: $sourceHash"
 
+      - name: Prepare release assets
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $source = "${{ github.workspace }}\packages\desktop\dist\opencode-desktop-win-x64.exe"
+          $asset = "${{ github.workspace }}\packages\desktop\dist\opencode-sliding-win-x64.exe"
+          $checksum = "$asset.sha256.txt"
+          Copy-Item $source $asset -Force
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  opencode-sliding-win-x64.exe" | Set-Content -Path $checksum -Encoding ascii
+          Write-Host "Release installer SHA256: $hash"
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: opencode-sliding-win-x64
           path: packages/desktop/dist/opencode-desktop-win-x64.exe
           if-no-files-found: error
+
+      - name: Publish GitHub prerelease
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "sliding-context-dev"
+          $asset = "${{ github.workspace }}\packages\desktop\dist\opencode-sliding-win-x64.exe"
+          $checksum = "$asset.sha256.txt"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) { throw "Could not replace existing prerelease" }
+          }
+
+          gh release create $tag $asset $checksum `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --prerelease `
+            --title "OpenCode Sliding Context - Windows x64" `
+            --notes "Development build of the sliding-context fork. Unsigned Windows x64 build. The model context uses a bounded sliding window while durable session history is retained."
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish prerelease" }
