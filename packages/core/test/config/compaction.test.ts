@@ -50,35 +50,37 @@ const it = testEffect(
     ]),
   ),
 )
+
 describe("ConfigCompactionPlugin.Plugin", () => {
-  it.live("merges settings and reloads changed config", () =>
+  it.live("keeps automatic compaction disabled while preserving manual compaction settings", () =>
     Effect.gen(function* () {
       const compaction = yield* SessionCompaction.Service
-      // An automatic compaction that is not due is skipped.
-      const due = (input: typeof nearInput) =>
-        compaction
-          .compact({ reason: "auto", context: input.context })
-          .pipe(Effect.map((outcome) => outcome.status !== "skipped"))
       const config = yield* Config.Test
       const bus = yield* Bus.Service
       yield* config.setEntries([
         new Document({
           type: "document",
-          info: new Info({ compaction: new ConfigCompaction.Info({ auto: false, buffer: 20_000 }) }),
-        }),
-        new Document({
-          type: "document",
           info: new Info({
             compaction: new ConfigCompaction.Info({
+              auto: true,
               buffer: 10_000,
               keep: new ConfigCompaction.Keep({ tokens: 0 }),
             }),
           }),
         }),
       ])
-      yield* ConfigCompactionPlugin.Plugin.effect(host({ event: { subscribe: () => bus.subscribe(Event.Updated) } }))
+      yield* ConfigCompactionPlugin.Plugin.effect(
+        host({
+          event: { subscribe: () => bus.subscribe(Event.Updated) },
+          session: { hook: () => Effect.void },
+        }),
+      )
 
-      expect(yield* due(nearInput)).toBe(false)
+      // The fork's sliding window owns automatic context bounding, so config cannot re-enable auto compaction.
+      expect(
+        (yield* compaction.compact({ reason: "auto", context: nearInput.context })).status,
+      ).toBe("skipped")
+
       const ended = yield* bus
         .subscribe(SessionEvent.Compaction.Ended)
         .pipe(Stream.runHead, Effect.forkScoped({ startImmediately: true }))
@@ -104,39 +106,6 @@ describe("ConfigCompactionPlugin.Plugin", () => {
         }),
       ).toEqual({ status: "completed" })
       expect(Option.getOrThrow(yield* Fiber.join(ended)).metadata?.keepID).toBe(messages[1].id)
-
-      yield* config.setEntries([
-        new Document({
-          type: "document",
-          info: new Info({ compaction: new ConfigCompaction.Info({ auto: true, buffer: 20_000 }) }),
-        }),
-        new Document({
-          type: "document",
-          info: new Info({ compaction: new ConfigCompaction.Info({ buffer: 10_000 }) }),
-        }),
-      ])
-      yield* bus.publish(Event.Updated, {})
-      yield* Effect.gen(function* () {
-        for (let attempt = 0; attempt < 200; attempt++) {
-          if (yield* due(nearInput)) return
-          yield* Effect.sleep("10 millis")
-        }
-        yield* Effect.die(new Error("Timed out waiting for compaction config reload"))
-      })
-      expect(yield* due(bufferedInput)).toBe(false)
-
-      yield* config.setEntries([
-        new Document({
-          type: "document",
-          info: new Info({ compaction: new ConfigCompaction.Info({ auto: true, buffer: 20_000 }) }),
-        }),
-      ])
-      yield* bus.publish(Event.Updated, {})
-      for (let attempt = 0; attempt < 200; attempt++) {
-        if (yield* due(bufferedInput)) return
-        yield* Effect.sleep("10 millis")
-      }
-      yield* Effect.die(new Error("Timed out waiting for compaction config reload"))
     }),
   )
 })
@@ -175,5 +144,4 @@ const input = (tokens: number) => {
     },
   }
 }
-const bufferedInput = input(85_000)
 const nearInput = input(95_000)
