@@ -1,0 +1,146 @@
+name: Windows desktop dev
+
+on:
+  push:
+    branches:
+      - sliding-window
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-desktop-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    name: windows x64 sliding context
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      OPENCODE_CHANNEL: dev
+      OPENCODE_CLI_TARGET: x86_64-pc-windows-msvc
+      OPENCODE_CLI_DIST: ${{ github.workspace }}\packages\cli\dist
+      OPENCODE_VERSION: 0.0.0-sliding.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.4.4
+
+      - name: Typecheck core
+        working-directory: packages/core
+        run: bun typecheck
+
+      - name: Test sliding context
+        working-directory: packages/core
+        run: bun test test/session-window.test.ts test/config/compaction.test.ts
+
+      - name: Build fork CLI with official Bun runtime
+        env:
+          BUN_COMPILE_RELEASE: bun-v1.4.4
+          GH_TOKEN: ${{ github.token }}
+        run: bun packages/cli/script/build.ts --target=opencode-windows-x64-baseline --skip-install
+
+      - name: Smoke test compiled CLI service
+        shell: pwsh
+        run: |
+          $source = "${{ github.workspace }}\packages\cli\dist\cli-windows-x64-baseline"
+          $smoke = "${{ github.workspace }}\packages\cli\dist\cli-windows-x64"
+          $binary = "$source\bin\opencode.exe"
+          if (!(Test-Path $binary)) { throw "Built fork CLI not found: $binary" }
+
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw "Compiled CLI could not start; exit code $LASTEXITCODE" }
+
+          if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
+          Copy-Item $source $smoke -Recurse -Force
+          try {
+            bun packages/cli/script/service-smoke.ts
+            if ($LASTEXITCODE -ne 0) { throw "Compiled CLI service smoke test failed with exit code $LASTEXITCODE" }
+          } finally {
+            if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
+          }
+
+      - name: Prepare desktop with fork CLI
+        shell: pwsh
+        working-directory: packages/desktop
+        run: |
+          $env:GITHUB_ACTIONS = "false"
+          bun ./scripts/prepare.ts
+
+      - name: Build desktop
+        shell: pwsh
+        working-directory: packages/desktop
+        run: |
+          $env:GITHUB_ACTIONS = "false"
+          bun run build
+
+      - name: Package unsigned Windows x64
+        shell: pwsh
+        working-directory: packages/desktop
+        run: |
+          $env:GITHUB_ACTIONS = "false"
+          bunx electron-builder --win --x64 --publish never --config electron-builder.config.ts
+
+      - name: Verify bundled fork CLI
+        shell: pwsh
+        run: |
+          $source = "${{ github.workspace }}\packages\cli\dist\cli-windows-x64-baseline\bin\opencode.exe"
+          $bundled = "${{ github.workspace }}\packages\desktop\dist\win-unpacked\resources\opencode-cli.exe"
+          if (!(Test-Path $source)) { throw "Built fork CLI not found: $source" }
+          if (!(Test-Path $bundled)) { throw "Bundled desktop CLI not found: $bundled" }
+          $sourceHash = (Get-FileHash $source -Algorithm SHA256).Hash
+          $bundledHash = (Get-FileHash $bundled -Algorithm SHA256).Hash
+          if ($sourceHash -ne $bundledHash) {
+            throw "Desktop did not bundle the CLI built from this fork"
+          }
+          Write-Host "Verified fork CLI SHA256: $sourceHash"
+
+      - name: Prepare release assets
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $source = "${{ github.workspace }}\packages\desktop\dist\opencode-desktop-win-x64.exe"
+          $asset = "${{ github.workspace }}\packages\desktop\dist\opencode-sliding-win-x64.exe"
+          $checksum = "$asset.sha256.txt"
+          Copy-Item $source $asset -Force
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          "$hash  opencode-sliding-win-x64.exe" | Set-Content -Path $checksum -Encoding ascii
+          Write-Host "Release installer SHA256: $hash"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: opencode-sliding-win-x64
+          path: packages/desktop/dist/opencode-desktop-win-x64.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub prerelease
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "sliding-context-dev"
+          $asset = "${{ github.workspace }}\packages\desktop\dist\opencode-sliding-win-x64.exe"
+          $checksum = "$asset.sha256.txt"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) { throw "Could not replace existing prerelease" }
+          }
+
+          gh release create $tag $asset $checksum `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --prerelease `
+            --title "OpenCode Sliding Context - Windows x64" `
+            --notes "Development build of the sliding-context fork. Unsigned Windows x64 build. The compiled CLI is built from the official Bun baseline runtime and passes the service lifecycle smoke test before packaging."
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish prerelease" }
