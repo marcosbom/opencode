@@ -27,7 +27,7 @@ export const Plugin = define({
     })
     yield* ctx.session.hook("context", (event) =>
       Effect.gen(function* () {
-        const available = yield* ctx.model.list()
+        const available = yield* ctx.model.list().pipe(Effect.orDie)
         const model = available.data.find(
           (candidate) => candidate.providerID === event.model.providerID && candidate.id === event.model.id,
         )
