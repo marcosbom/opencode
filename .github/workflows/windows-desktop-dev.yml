@@ -39,7 +39,7 @@ jobs:
 
       - name: Test sliding context
         working-directory: packages/core
-        run: bun test test/session-window.test.ts
+        run: bun test test/session-window.test.ts test/config/compaction.test.ts
 
       - name: Build fork CLI
         run: bun packages/cli/script/build.ts --target=opencode-windows-x64-baseline --skip-install
