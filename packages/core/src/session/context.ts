@@ -17,6 +17,7 @@ import { ReferenceInstructions } from "../reference/instructions.js"
 import { SkillInstructions } from "../skill/instructions.js"
 import { Tool } from "../tool.js"
 import { AgentNotFoundError } from "./error.js"
+import { SessionCurrentInstructions } from "./current-instructions.js"
 import { SessionHistory } from "./history.js"
 import { InstructionEntry } from "./instruction-entry.js"
 import { SessionMessage } from "./message.js"
@@ -173,12 +174,18 @@ const layer = Layer.effect(
         selection.instructions,
         model.ref,
       )
+      // Sliding context uses the currently folded instruction state as the fixed baseline.
+      // Chronological instruction-update messages remain durable history but are not replayed
+      // into the model window, so trimming old exchanges cannot resurrect stale instructions.
+      const initial = yield* SessionCurrentInstructions.render(db, selection.session.id, selection.instructions)
       return {
         session: selection.session,
         agent: selection.agent,
         model,
-        initial: history.initial,
-        messages: history.entries.map((entry) => entry.message),
+        initial,
+        messages: history.entries
+          .filter((entry) => entry.message.type !== "system")
+          .map((entry) => entry.message),
         tools: selection.tools,
       }
     })
