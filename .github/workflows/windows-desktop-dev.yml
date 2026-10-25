@@ -41,8 +41,31 @@ jobs:
         working-directory: packages/core
         run: bun test test/session-window.test.ts test/config/compaction.test.ts
 
-      - name: Build fork CLI
+      - name: Build fork CLI with official Bun runtime
+        env:
+          BUN_COMPILE_RELEASE: bun-v1.4.4
+          GH_TOKEN: ${{ github.token }}
         run: bun packages/cli/script/build.ts --target=opencode-windows-x64-baseline --skip-install
+
+      - name: Smoke test compiled CLI service
+        shell: pwsh
+        run: |
+          $source = "${{ github.workspace }}\packages\cli\dist\cli-windows-x64-baseline"
+          $smoke = "${{ github.workspace }}\packages\cli\dist\cli-windows-x64"
+          $binary = "$source\bin\opencode.exe"
+          if (!(Test-Path $binary)) { throw "Built fork CLI not found: $binary" }
+
+          & $binary --version
+          if ($LASTEXITCODE -ne 0) { throw "Compiled CLI could not start; exit code $LASTEXITCODE" }
+
+          if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
+          Copy-Item $source $smoke -Recurse -Force
+          try {
+            bun packages/cli/script/service-smoke.ts
+            if ($LASTEXITCODE -ne 0) { throw "Compiled CLI service smoke test failed with exit code $LASTEXITCODE" }
+          } finally {
+            if (Test-Path $smoke) { Remove-Item $smoke -Recurse -Force }
+          }
 
       - name: Prepare desktop with fork CLI
         shell: pwsh
@@ -119,5 +142,5 @@ jobs:
             --target $env:GITHUB_SHA `
             --prerelease `
             --title "OpenCode Sliding Context - Windows x64" `
-            --notes "Development build of the sliding-context fork. Unsigned Windows x64 build. The model context uses a bounded sliding window while durable session history is retained."
+            --notes "Development build of the sliding-context fork. Unsigned Windows x64 build. The compiled CLI is built from the official Bun baseline runtime and passes the service lifecycle smoke test before packaging."
           if ($LASTEXITCODE -ne 0) { throw "Could not publish prerelease" }
