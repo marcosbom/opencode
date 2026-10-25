@@ -11,7 +11,7 @@ const PDF_TOKEN_ESTIMATE = 2_000
 type Request = Pick<SessionHooks["context"], "system" | "messages" | "tools">
 type Message = Request["messages"][number]
 type Part = Message["content"][number]
-type Limit = { readonly input: number; readonly context: number }
+type Limit = { readonly input?: number; readonly context: number }
 
 export type Projection = {
   readonly messages: Message[]
